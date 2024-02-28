@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -131,8 +130,9 @@ func NewWireguardRoutedHttpClient(netstack *netstack.Net, perRequestTimeout time
 	}
 
 	rsp, err := client.Do(req)
-	cncl()
 	if err != nil /*&& !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)*/ {
+		cncl()
+
 		errors = append(errors, err)
 		ctxt, cncl = context.WithTimeout(context.Background(), perRequestTimeout)
 		req, err = http.NewRequestWithContext(ctxt, http.MethodGet, "https://ifconfig.io/ip", nil)
@@ -141,8 +141,9 @@ func NewWireguardRoutedHttpClient(netstack *netstack.Net, perRequestTimeout time
 		}
 
 		rsp, err = client.Do(req)
-		cncl()
 		if err != nil {
+			cncl()
+
 			errors = append(errors, err)
 			ctxt, cncl = context.WithTimeout(context.Background(), perRequestTimeout)
 			req, err = http.NewRequestWithContext(ctxt, http.MethodGet, "https://ipinfo.io/ip", nil)
@@ -151,21 +152,22 @@ func NewWireguardRoutedHttpClient(netstack *netstack.Net, perRequestTimeout time
 			}
 
 			rsp, err = client.Do(req)
-			cncl()
 			if err != nil {
+				cncl()
+
 				errors = append(errors, err)
 				return nil, errors
 			}
 		}
 	}
 
-	bodyReader := bufio.NewReader(rsp.Body)
-	body, err := io.ReadAll(bodyReader)
+	body, err := io.ReadAll(rsp.Body)
 	if err != nil {
 		panic(err)
 	}
-
 	_ = rsp.Body.Close()
+
+	cncl()
 
 	client.SourceAddress = strings.Trim(string(body), "\n")
 
@@ -283,14 +285,16 @@ func main() {
 
 					// Don't VPN CapSolver, we could, but it would require messing with their official sdk, which isn't worth it
 					rsp, err := http.DefaultClient.Do(req)
-					cncl()
 					if err != nil {
+						cncl()
 						fmt.Printf("[-] failed to connect to capsolver (%v tries remaining): %v\n", retryCount, err)
 						continue
 					}
 
 					if capSolverResponse, err := io.ReadAll(rsp.Body); err == nil {
 						_ = rsp.Body.Close()
+						cncl()
+
 						status := &struct{ Status string }{}
 						err = json.Unmarshal(capSolverResponse, status)
 						if err != nil {
@@ -305,6 +309,7 @@ func main() {
 							continue
 						}
 					} else {
+						cncl()
 						fmt.Printf("[-] failed to read capsolver status response (retry count: %v): %v\n", retryCount, err)
 						continue
 					}
@@ -369,7 +374,9 @@ func main() {
 				}
 
 				_ = clanlistRsp.Body.Close()
+				cncl()
 			} else {
+				cncl()
 				fmt.Printf("[-] failed to connect to clanlist: %v\n", err)
 				continue
 			}
@@ -409,63 +416,47 @@ func main() {
 			gRecaptchaResponse := solution.Solution.GRecaptchaResponse
 			fmt.Print("[+] got recaptcha response from CapSolver\n")
 
-			// Make the POST to ClanList to do the vote
-			formValues := url.Values{}
-			formValues.Set("_token", token)
-			formValues.Set("g-recaptcha-response", gRecaptchaResponse)
-			formValues.Set("username", targetAccount)
-
-			ctxt, cncl = context.WithTimeout(context.Background(), requestTimeout)
-			req, err = http.NewRequestWithContext(ctxt, http.MethodPost, "https://clanlist.io/test-v", strings.NewReader(formValues.Encode()))
-			if err != nil {
-				panic(err)
-			}
-
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0")
-			req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
-			req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-			req.Header.Set("X-Requested-With", "XMLHttpRequest")
-			req.Header.Set("Origin", "https://clanlist.io")
-			req.Header.Set("Referer", fmt.Sprintf("https://clanlist.io/vote/%v", targetAccount))
-			req.Header.Set("Sec-Fetch-Dest", "empty")
-			req.Header.Set("Sec-Fetch-Mode", "cors")
-			req.Header.Set("Sec-Fetch-Site", "same-origin")
-
-			isContextCancelled := func(ctxt context.Context) bool {
-				select {
-				case <-ctxt.Done():
-					return true
-				default:
-					return false
-				}
-			}
-
 			submitted := false
 			for retryCount := 3; retryCount >= 0; retryCount-- {
-				rsp, err := client.Do(req)
-				cncl()
-				if err != nil {
-					fmt.Printf("[-] failed to submit vote to clanlist: %v\n", err)
-					if isContextCancelled(ctxt) {
-						break
-					}
+				// Make the POST to ClanList to do the vote
+				formValues := url.Values{}
+				formValues.Set("_token", token)
+				formValues.Set("g-recaptcha-response", gRecaptchaResponse)
+				formValues.Set("username", targetAccount)
 
+				ctxt, cncl = context.WithTimeout(context.Background(), requestTimeout)
+				req, err = http.NewRequestWithContext(ctxt, http.MethodPost, "https://clanlist.io/test-v", strings.NewReader(formValues.Encode()))
+				if err != nil {
+					panic(err)
+				}
+
+				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0")
+				req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+				req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+				req.Header.Set("X-Requested-With", "XMLHttpRequest")
+				req.Header.Set("Origin", "https://clanlist.io")
+				req.Header.Set("Referer", fmt.Sprintf("https://clanlist.io/vote/%v", targetAccount))
+				req.Header.Set("Sec-Fetch-Dest", "empty")
+				req.Header.Set("Sec-Fetch-Mode", "cors")
+				req.Header.Set("Sec-Fetch-Site", "same-origin")
+
+				rsp, err := client.Do(req)
+				if err != nil {
+					cncl()
+					fmt.Printf("[-] failed to submit vote to clanlist: %v\n", err)
 					time.Sleep(2 * time.Second)
 					continue
 				}
 
 				response, err := io.ReadAll(rsp.Body)
 				_ = rsp.Body.Close()
+				cncl()
 
 				clanlistSuccess := struct{ Success string }{}
 				err = json.Unmarshal(response, &clanlistSuccess)
 				if err != nil {
 					fmt.Printf("[-] failed to submite vote to clanlist (%s): %v\n", response, err)
-					if isContextCancelled(ctxt) {
-						break
-					}
-
 					time.Sleep(1 * time.Second)
 					continue
 				}

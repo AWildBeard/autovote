@@ -56,7 +56,7 @@ Once you have;
 
 Kickoff the bot with
 ```shell
-./autovote -C 'CAPSOLVER_API_TOKEN' -a 'Name of account to vote for'
+./autovote -c "path-to-unified-wireguard-config" -C 'CAPSOLVER_API_TOKEN' -a 'Name of account to vote for'
 ```
 
 For a full list of options, check out `./autovote -h`

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -128,8 +127,9 @@ func NewWireguardRoutedHttpClient(netstack *netstack.Net, perRequestTimeout time
 	}
 
 	rsp, err := client.Do(req)
-	cncl()
 	if err != nil /*&& !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)*/ {
+		cncl()
+
 		errors = append(errors, err)
 		ctxt, cncl = context.WithTimeout(context.Background(), perRequestTimeout)
 		req, err = http.NewRequestWithContext(ctxt, http.MethodGet, "https://ifconfig.io/ip", nil)
@@ -138,8 +138,8 @@ func NewWireguardRoutedHttpClient(netstack *netstack.Net, perRequestTimeout time
 		}
 
 		rsp, err = client.Do(req)
-		cncl()
 		if err != nil {
+			cncl()
 			errors = append(errors, err)
 			ctxt, cncl = context.WithTimeout(context.Background(), perRequestTimeout)
 			req, err = http.NewRequestWithContext(ctxt, http.MethodGet, "https://ipinfo.io/ip", nil)
@@ -148,21 +148,21 @@ func NewWireguardRoutedHttpClient(netstack *netstack.Net, perRequestTimeout time
 			}
 
 			rsp, err = client.Do(req)
-			cncl()
 			if err != nil {
+				cncl()
 				errors = append(errors, err)
 				return nil, errors
 			}
 		}
 	}
 
-	bodyReader := bufio.NewReader(rsp.Body)
-	body, err := io.ReadAll(bodyReader)
+	body, err := io.ReadAll(rsp.Body)
 	if err != nil {
 		panic(err)
 	}
 
 	_ = rsp.Body.Close()
+	cncl()
 
 	client.SourceAddress = strings.Trim(string(body), "\n")
 
@@ -226,6 +226,7 @@ func main() {
 				break
 			}
 
+			// Remove all peers before sleeping, so we don't stay connected for longer than we absolutely have to
 			tunnelControlDevice.RemoveAllPeers()
 
 			if doSleep {
@@ -263,32 +264,41 @@ func main() {
 			}
 
 			// Do the base request to milsimunits to look semi-real, not really trying, but not not trying either
-			ctxt, cncl := context.WithTimeout(context.Background(), requestTimeout)
-			req, err := http.NewRequestWithContext(ctxt, http.MethodGet, profileURL, nil)
-			if err != nil {
-				panic(err)
-			}
+			accessed := false
+			for retryCount := 3; retryCount >= 0; retryCount-- {
+				ctxt, cncl := context.WithTimeout(context.Background(), requestTimeout)
+				req, err := http.NewRequestWithContext(ctxt, http.MethodGet, profileURL, nil)
+				if err != nil {
+					panic(err)
+				}
 
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0")
-			req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9")
-			req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-			req.Header.Set("Sec-Fetch-Dest", "document")
-			req.Header.Set("Sec-Fetch-Mode", "navigate")
-			req.Header.Set("Sec-Fetch-Site", "cross-site")
+				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0")
+				req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9")
+				req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+				req.Header.Set("Sec-Fetch-Dest", "document")
+				req.Header.Set("Sec-Fetch-Mode", "navigate")
+				req.Header.Set("Sec-Fetch-Site", "cross-site")
 
-			if milsimunitsRsp, err := client.Do(req); err == nil {
-				fmt.Printf("[+] got profile page\n")
-				_ = milsimunitsRsp.Body.Close()
-			} else {
-				fmt.Printf("[-] failed to connect to milsimunits: %v\n", err)
-				continue
+				if milsimunitsRsp, err := client.Do(req); err == nil {
+					fmt.Printf("[+] got profile page\n")
+					_ = milsimunitsRsp.Body.Close()
+					cncl()
+					accessed = true
+				} else {
+					cncl()
+					fmt.Printf("[-] failed to connect to milsimunits: %v\n", err)
+					continue
+				}
 			}
 
 			// Take a break, to simulate teh humanns. Sleep at least 6 seconds, up to a max of 30 seconds
-			{
+			if accessed {
 				timeToSleep := time.Duration(rand.Intn(14)+6) * time.Second
 				fmt.Printf("[?] backing off for %s for 'realism'\n", timeToSleep)
 				time.Sleep(timeToSleep)
+			} else {
+				fmt.Printf("[-] failed to connect to milsimunits after 3 tries, trying a new peer\n")
+				continue
 			}
 
 			content, err := json.Marshal(struct {
@@ -298,57 +308,42 @@ func main() {
 				panic(err)
 			}
 
-			ctxt, cncl = context.WithTimeout(context.Background(), requestTimeout)
-			req, err = http.NewRequestWithContext(ctxt, http.MethodPost, "https://milsimunits.com/api/vote", bytes.NewReader(content))
-			if err != nil {
-				panic(err)
-			}
-
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0")
-			req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
-			req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Origin", "https://milsimunits.com")
-			req.Header.Set("Pragma", "no-cache")
-			req.Header.Set("Referer", profileURL)
-			req.Header.Set("Sec-Fetch-Dest", "empty")
-			req.Header.Set("Sec-Fetch-Mode", "cors")
-			req.Header.Set("Sec-Fetch-Site", "same-origin")
-
-			isContextCancelled := func(ctxt context.Context) bool {
-				select {
-				case <-ctxt.Done():
-					return true
-				default:
-					return false
-				}
-			}
-
 			submitted := false
 			for retryCount := 3; retryCount >= 0; retryCount-- {
-				rsp, err := client.Do(req)
-				cncl()
+				ctxt, cncl := context.WithTimeout(context.Background(), requestTimeout)
+				req, err := http.NewRequestWithContext(ctxt, http.MethodPost, "https://milsimunits.com/api/vote", bytes.NewReader(content))
 				if err != nil {
-					fmt.Printf("[-] failed to submit vote to milsimunits: %v\n", err)
-					if isContextCancelled(ctxt) {
-						break
-					}
+					panic(err)
+				}
 
+				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0")
+				req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+				req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Origin", "https://milsimunits.com")
+				req.Header.Set("Pragma", "no-cache")
+				req.Header.Set("Referer", profileURL)
+				req.Header.Set("Sec-Fetch-Dest", "empty")
+				req.Header.Set("Sec-Fetch-Mode", "cors")
+				req.Header.Set("Sec-Fetch-Site", "same-origin")
+
+				rsp, err := client.Do(req)
+				if err != nil {
+					cncl()
+
+					fmt.Printf("[-] failed to submit vote to milsimunits: %v\n", err)
 					time.Sleep(2 * time.Second)
 					continue
 				}
 
 				response, err := io.ReadAll(rsp.Body)
 				_ = rsp.Body.Close()
+				cncl()
 
 				milsimunitsVotes := struct{ Votes int }{}
 				err = json.Unmarshal(response, &milsimunitsVotes)
 				if err != nil {
 					fmt.Printf("[-] failed to submite vote to milsimunits (%s): %v\n", response, err)
-					if isContextCancelled(ctxt) {
-						break
-					}
-
 					time.Sleep(1 * time.Second)
 					continue
 				}
@@ -361,6 +356,8 @@ func main() {
 				fmt.Printf("[+] successfully submitted vote to milsimunits\n")
 				voteCount = voteCount - 1
 				doSleep = true
+			} else {
+				fmt.Printf("[-] failed to submit vote to milsimunits after 3 attempts\n")
 			}
 		}
 	}

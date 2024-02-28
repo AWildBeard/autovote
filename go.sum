@@ -1,7 +1,5 @@
 github.com/MakeNowJust/heredoc/v2 v2.0.1 h1:rlCHh70XXXv7toz95ajQWOWQnN4WNLt0TdpZYIR/J6A=
 github.com/MakeNowJust/heredoc/v2 v2.0.1/go.mod h1:6/2Abh5s+hc3g9nbWLe9ObDIOhaRrqsyY9MWy+4JdRM=
-github.com/capsolver/capsolver-go v0.0.0-20240131070505-d99882bd4bc2 h1:jchTPG9fQEvlX6fiVgdzjZ6BJ8hdXH1Rm4PhWQocnM8=
-github.com/capsolver/capsolver-go v0.0.0-20240131070505-d99882bd4bc2/go.mod h1:auD5FFe3cKFAtiRmeD8I8Bf1Og/NAlnmJqtbjOb6qPM=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/go-ini/ini v1.67.0 h1:z6ZrTEZqSWOTyH2FlglNbNgARyHG8oLW9gMELqKr06A=

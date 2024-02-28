@@ -7,10 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/MakeNowJust/heredoc/v2"
-	capsolver "github.com/capsolver/capsolver-go"
 	"github.com/go-ini/ini"
 	"github.com/spf13/pflag"
-	"golang.org/x/net/html"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
@@ -19,7 +17,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/netip"
-	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -31,7 +28,7 @@ var (
 	voteCountMin        uint
 	voteCountMax        uint
 	targetAccount       string
-	capSolverAPIToken   string
+	profileURL          string
 	requestTimeout      time.Duration
 	floatTimeMin        time.Duration
 	floatTimeMax        time.Duration
@@ -50,10 +47,10 @@ func init() {
 	pflag.UintVarP(&voteCountMax, "max-votes", "V", 20,
 		"Maximum number of votes to issue to ClanList. The total number of votes to cast is randomized between "+
 			"this flag and the --min-votes (-v) flag.")
-	pflag.StringVarP(&capSolverAPIToken, "cap-solver-token", "C", "",
-		"API token for CapSolver")
+	pflag.StringVarP(&profileURL, "profile", "p", "",
+		"Profile page to request before requesting anything else. Just used to at least *try* to make it look real.")
 	pflag.StringVarP(&targetAccount, "account", "a", "",
-		"Account name to vote for. This can be found in the URL when on the page to vote.")
+		"Account ID to vote for. This can be found in the POST request when voting.")
 	pflag.DurationVarP(&requestTimeout, "timeout", "t", 30*time.Second,
 		"Time to wait for a HTTP request to complete. Leaving this high should be fine.")
 	pflag.DurationVarP(&floatTimeMin, "min-float-Time", "f", 6*time.Minute,
@@ -197,8 +194,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if capSolverAPIToken == "" {
-		fmt.Printf("you must supply a cap solver API token with --cap-solver-token (-C)\n")
+	if profileURL == "" {
+		fmt.Printf("you must supply a profile URL with --profile (-p)\n")
 		os.Exit(1)
 	}
 
@@ -265,57 +262,9 @@ func main() {
 				fmt.Printf("[+] peer %v succeeded connectivity test with external IP %v\n", *config.Endpoint, client.SourceAddress)
 			}
 
-			// Test if capsolver is online and is ready to receive requests
-			{
-				errored := false
-				for retryCount := 3; retryCount > 0; retryCount-- {
-					if errored {
-						time.Sleep(2 * time.Second)
-					} else {
-						errored = true
-					}
-
-					ctxt, cncl := context.WithTimeout(context.Background(), requestTimeout)
-					req, err := http.NewRequestWithContext(ctxt, http.MethodGet, "https://api.capsolver.com", nil)
-					if err != nil {
-						panic(err)
-					}
-
-					// Don't VPN CapSolver, we could, but it would require messing with their official sdk, which isn't worth it
-					rsp, err := http.DefaultClient.Do(req)
-					cncl()
-					if err != nil {
-						fmt.Printf("[-] failed to connect to capsolver (%v tries remaining): %v\n", retryCount, err)
-						continue
-					}
-
-					if capSolverResponse, err := io.ReadAll(rsp.Body); err == nil {
-						_ = rsp.Body.Close()
-						status := &struct{ Status string }{}
-						err = json.Unmarshal(capSolverResponse, status)
-						if err != nil {
-							fmt.Printf("[-] failed to unmarshal capsolver response: %v\n", err)
-							continue
-						}
-
-						if status.Status == "ready" {
-							fmt.Printf("[+] capsolver reporting ready\n")
-						} else {
-							fmt.Printf("[-] capsolver is not ready (retry count: %v) : \"status\":%v\n", retryCount, status.Status)
-							continue
-						}
-					} else {
-						fmt.Printf("[-] failed to read capsolver status response (retry count: %v): %v\n", retryCount, err)
-						continue
-					}
-
-					break
-				}
-			}
-
-			// Do the base request to ClanList for the ReCaptcha SiteKey and `_token` that is required by ClanList
+			// Do the base request to milsimunits to look semi-real, not really trying, but not not trying either
 			ctxt, cncl := context.WithTimeout(context.Background(), requestTimeout)
-			req, err := http.NewRequestWithContext(ctxt, http.MethodGet, "https://clanlist.io/vote/"+targetAccount, nil)
+			req, err := http.NewRequestWithContext(ctxt, http.MethodGet, profileURL, nil)
 			if err != nil {
 				panic(err)
 			}
@@ -327,58 +276,12 @@ func main() {
 			req.Header.Set("Sec-Fetch-Mode", "navigate")
 			req.Header.Set("Sec-Fetch-Site", "cross-site")
 
-			token := ""
-			siteKey := ""
-			if clanlistRsp, err := client.Do(req); err == nil {
-				tokenizer := html.NewTokenizer(clanlistRsp.Body)
-
-				// parse for _token and data-sitekey
-			tokenAndSiteKeySearch:
-				for token == "" || siteKey == "" {
-					tokenType := tokenizer.Next()
-					switch tokenType {
-					case html.ErrorToken:
-						// Invalid HTML encountered
-						break tokenAndSiteKeySearch
-					case html.StartTagToken:
-						tokenElement := tokenizer.Token()
-						if tokenElement.Data == "div" {
-							for _, attr := range tokenElement.Attr {
-								if attr.Key == "data-sitekey" {
-									siteKey = attr.Val
-								}
-							}
-						}
-
-						if tokenElement.Data == "input" {
-						tokenSearch:
-							for _, attr := range tokenElement.Attr {
-								if attr.Key == "name" && attr.Val == "_token" {
-									for _, attr = range tokenElement.Attr {
-										if attr.Key == "value" {
-											token = attr.Val
-											break tokenSearch
-										}
-									}
-								}
-							}
-						}
-					default:
-						continue
-					}
-				}
-
-				_ = clanlistRsp.Body.Close()
+			if milsimunitsRsp, err := client.Do(req); err == nil {
+				fmt.Printf("[+] got profile page\n")
+				_ = milsimunitsRsp.Body.Close()
 			} else {
-				fmt.Printf("[-] failed to connect to clanlist: %v\n", err)
+				fmt.Printf("[-] failed to connect to milsimunits: %v\n", err)
 				continue
-			}
-
-			if token == "" || siteKey == "" {
-				fmt.Printf("[-] failed to find token (found: \"%v\") or sitekey (found: \"%v\")\n", len(token) > 0, len(siteKey) > 0)
-				continue
-			} else {
-				fmt.Printf("[+] found token \"%v\" and sitekey \"%v\"\n", token, siteKey)
 			}
 
 			// Take a break, to simulate teh humanns. Sleep at least 6 seconds, up to a max of 30 seconds
@@ -388,35 +291,15 @@ func main() {
 				time.Sleep(timeToSleep)
 			}
 
-			// get CapSolver solution
-			solver := capsolver.CapSolver{ApiKey: capSolverAPIToken}
-			solution, err := solver.Solve(map[string]any{
-				"type":       "ReCaptchaV2taskProxyLess",
-				"websiteURL": "https://clanlist.io/vote/" + targetAccount,
-				"websiteKey": siteKey,
-			})
-
-			if err != nil || (solution != nil && solution.ErrorId == 1) {
-				if solution != nil {
-					fmt.Printf("[-] CapSolver failed: errorid: %v, errorCode: %v, errorDescription: %v, golang error: %v\n", solution.ErrorId, solution.ErrorCode, solution.ErrorDescription, err)
-				} else {
-					fmt.Printf("[-] CapSolver failed: %v\n", err)
-				}
-
-				continue
+			content, err := json.Marshal(struct {
+				UnitId string `json:"unitId"`
+			}{UnitId: targetAccount})
+			if err != nil { // This should blatantly never occur
+				panic(err)
 			}
 
-			gRecaptchaResponse := solution.Solution.GRecaptchaResponse
-			fmt.Print("[+] got recaptcha response from CapSolver\n")
-
-			// Make the POST to ClanList to do the vote
-			formValues := url.Values{}
-			formValues.Set("_token", token)
-			formValues.Set("g-recaptcha-response", gRecaptchaResponse)
-			formValues.Set("username", targetAccount)
-
 			ctxt, cncl = context.WithTimeout(context.Background(), requestTimeout)
-			req, err = http.NewRequestWithContext(ctxt, http.MethodPost, "https://clanlist.io/test-v", strings.NewReader(formValues.Encode()))
+			req, err = http.NewRequestWithContext(ctxt, http.MethodPost, "https://milsimunits.com/api/vote", bytes.NewReader(content))
 			if err != nil {
 				panic(err)
 			}
@@ -424,10 +307,10 @@ func main() {
 			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0")
 			req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
 			req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-			req.Header.Set("X-Requested-With", "XMLHttpRequest")
-			req.Header.Set("Origin", "https://clanlist.io")
-			req.Header.Set("Referer", fmt.Sprintf("https://clanlist.io/vote/%v", targetAccount))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Origin", "https://milsimunits.com")
+			req.Header.Set("Pragma", "no-cache")
+			req.Header.Set("Referer", profileURL)
 			req.Header.Set("Sec-Fetch-Dest", "empty")
 			req.Header.Set("Sec-Fetch-Mode", "cors")
 			req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -446,7 +329,7 @@ func main() {
 				rsp, err := client.Do(req)
 				cncl()
 				if err != nil {
-					fmt.Printf("[-] failed to submit vote to clanlist: %v\n", err)
+					fmt.Printf("[-] failed to submit vote to milsimunits: %v\n", err)
 					if isContextCancelled(ctxt) {
 						break
 					}
@@ -458,10 +341,10 @@ func main() {
 				response, err := io.ReadAll(rsp.Body)
 				_ = rsp.Body.Close()
 
-				clanlistSuccess := struct{ Success string }{}
-				err = json.Unmarshal(response, &clanlistSuccess)
+				milsimunitsVotes := struct{ Votes int }{}
+				err = json.Unmarshal(response, &milsimunitsVotes)
 				if err != nil {
-					fmt.Printf("[-] failed to submite vote to clanlist (%s): %v\n", response, err)
+					fmt.Printf("[-] failed to submite vote to milsimunits (%s): %v\n", response, err)
 					if isContextCancelled(ctxt) {
 						break
 					}
@@ -475,7 +358,7 @@ func main() {
 			}
 
 			if submitted {
-				fmt.Printf("[+] successfully submitted vote to clanlist\n")
+				fmt.Printf("[+] successfully submitted vote to milsimunits\n")
 				voteCount = voteCount - 1
 				doSleep = true
 			}

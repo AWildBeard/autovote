@@ -21,19 +21,24 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 )
 
 var (
-	vpnConfigPath     string
-	voteCountMin      uint
-	voteCountMax      uint
-	targetAccount     string
-	capSolverAPIToken string
-	requestTimeout    time.Duration
-	floatTimeMin      time.Duration
-	floatTimeMax      time.Duration
+	vpnConfigPath       string
+	voteCountMin        uint
+	voteCountMax        uint
+	targetAccount       string
+	capSolverAPIToken   string
+	requestTimeout      time.Duration
+	floatTimeMin        time.Duration
+	floatTimeMax        time.Duration
+	printVersionAndExit bool
+
+	buildType    string
+	buildVersion string
 )
 
 func init() {
@@ -57,6 +62,8 @@ func init() {
 	pflag.DurationVarP(&floatTimeMax, "max-float-time", "F", 20*time.Minute,
 		"Maximum time between attempting to vote. Exactly when the attempt is made is randomized between "+
 			"this flag and the --min-float-time (-f) flag.")
+	pflag.BoolVar(&printVersionAndExit, "version", false,
+		"Print version information then exit")
 }
 
 func getConfig(c string) (*DeviceConfig, error) {
@@ -167,6 +174,11 @@ func NewWireguardRoutedHttpClient(netstack *netstack.Net, perRequestTimeout time
 
 func main() {
 	pflag.Parse()
+
+	if printVersionAndExit {
+		fmt.Printf("%v-%v-%v\n", runtime.Version(), buildVersion, buildType)
+		os.Exit(0)
+	}
 
 	vpnConfig, err := getConfig(vpnConfigPath)
 	if err != nil {

@@ -1,4 +1,4 @@
-FROM golang:latest as builder
+FROM golang:1.21 as builder
 WORKDIR /app
 COPY ["Makefile", "go.*", "*.go", "./"]
 RUN make release build

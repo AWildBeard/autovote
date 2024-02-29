@@ -265,7 +265,7 @@ func main() {
 
 			// Do the base request to milsimunits to look semi-real, not really trying, but not not trying either
 			accessed := false
-			for retryCount := 3; retryCount >= 0; retryCount-- {
+			for retryCount := 3; retryCount >= 0 && !accessed; retryCount-- {
 				ctxt, cncl := context.WithTimeout(context.Background(), requestTimeout)
 				req, err := http.NewRequestWithContext(ctxt, http.MethodGet, profileURL, nil)
 				if err != nil {
@@ -279,16 +279,16 @@ func main() {
 				req.Header.Set("Sec-Fetch-Mode", "navigate")
 				req.Header.Set("Sec-Fetch-Site", "cross-site")
 
-				if milsimunitsRsp, err := client.Do(req); err == nil {
-					fmt.Printf("[+] got profile page\n")
-					_ = milsimunitsRsp.Body.Close()
-					cncl()
-					accessed = true
-				} else {
-					cncl()
+				milsimunitsRsp, err := client.Do(req)
+				cncl()
+				if err != nil {
 					fmt.Printf("[-] failed to connect to milsimunits: %v\n", err)
 					continue
 				}
+
+				_ = milsimunitsRsp.Body.Close()
+				fmt.Printf("[+] got profile page\n")
+				accessed = true
 			}
 
 			// Take a break, to simulate teh humanns. Sleep at least 6 seconds, up to a max of 30 seconds
@@ -309,7 +309,7 @@ func main() {
 			}
 
 			submitted := false
-			for retryCount := 3; retryCount >= 0; retryCount-- {
+			for retryCount := 3; retryCount >= 0 && !submitted; retryCount-- {
 				ctxt, cncl := context.WithTimeout(context.Background(), requestTimeout)
 				req, err := http.NewRequestWithContext(ctxt, http.MethodPost, "https://milsimunits.com/api/vote", bytes.NewReader(content))
 				if err != nil {

@@ -11,4 +11,5 @@ RUN make release build
 FROM debian:latest
 COPY --chown=0:0 --from=builder /app/app /
 USER 65534
-ENTRYPOINT ["/bin/sh", "-c", "/app"]
+ENTRYPOINT ["/bin/sh", "-c", "/app \"$@\""]
+CMD []

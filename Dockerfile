@@ -9,6 +9,7 @@ RUN make release build
 #RUN mkdir -p lib64 && cp /lib64/ld-linux-x86-64.so.2 lib64/
 
 FROM debian:latest
+COPY --chown=0:0 --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --chown=0:0 --from=builder /app/app /
 USER 65534
 CMD "app"

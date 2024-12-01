@@ -10,6 +10,6 @@ RUN make release build
 
 FROM debian:latest
 COPY --chown=0:0 --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --chown=0:0 --from=builder /dist /
+COPY --chown=0:0 --from=builder /app/app /
 USER 65534
 ENTRYPOINT ["/app"]
